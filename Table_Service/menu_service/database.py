@@ -3,7 +3,7 @@ from sqlmodel import SQLModel, create_engine, Session
 from sqlalchemy.orm import sessionmaker
 import time
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://auth_user:auth_pass@postgres:5432/auth_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://menu_user:menu_pass@postgres:5432/menu_db")
 
 engine = create_engine(DATABASE_URL, echo=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

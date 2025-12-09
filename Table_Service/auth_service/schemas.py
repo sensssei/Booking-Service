@@ -10,6 +10,7 @@ class UserCreate(BaseModel):
     password: constr(min_length=6)
     full_name: Optional[str] = None
     phone: Optional[str] = None
+    role: Optional[str] = "user"  # Добавляем роль
 
 class UserLogin(BaseModel):
     """
@@ -25,10 +26,19 @@ class UserRead(BaseModel):
     """
     id: int
     email: EmailStr
+    role: str  # Добавляем роль
     full_name: Optional[str]
     phone: Optional[str]
     created_at: datetime
     updated_at: datetime
+
+class UserUpdate(BaseModel):
+    """
+    Схема для обновления данных пользователя.
+    """
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    role: Optional[str] = None
 
 class TokenResponse(BaseModel):
     """
@@ -36,10 +46,14 @@ class TokenResponse(BaseModel):
     """
     access_token: str
     token_type: str = "bearer"
+    user_id: int
+    role: str
+    expires_in: int = 7200  # 2 часа в секундах
 
 class TokenPayload(BaseModel):
     """
     Полезная нагрузка токена JWT.
     """
     user_id: int
+    role: str
     exp: int

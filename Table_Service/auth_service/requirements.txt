@@ -7,4 +7,4 @@ python-jose[cryptography]
 python-multipart
 email-validator
 PyJWT
-aiokafka
+aiokafka==0.7.2

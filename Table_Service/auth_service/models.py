@@ -11,6 +11,9 @@ class User(SQLModel, table=True):
 
     email: str = Field(index=True, nullable=False, unique=True)
     password_hash: str = Field(nullable=False)
+    
+    # Добавляем поле role
+    role: str = Field(default="user", nullable=False)  # "user", "admin", "manager"
 
     full_name: Optional[str] = Field(default=None)
     phone: Optional[str] = Field(default=None)

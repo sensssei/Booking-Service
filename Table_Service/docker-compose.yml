@@ -1,8 +1,51 @@
-version: "3.9"
-
 services:
-  postgres:
-    image: postgres:15
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - restaurant-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - restaurant-network
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # База данных для Auth Service
+  postgres_auth:
+    image: postgres:15-alpine
+    container_name: postgres_auth
     environment:
       POSTGRES_USER: auth_user
       POSTGRES_PASSWORD: auth_pass
@@ -10,34 +53,166 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_auth_data:/var/lib/postgresql/data
+    networks:
+      - restaurant-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth_user -d auth_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # База данных для Menu Service
+  postgres_menu:
+    image: postgres:15-alpine
+    container_name: postgres_menu
+    environment:
+      POSTGRES_USER: menu_user
+      POSTGRES_PASSWORD: menu_pass
+      POSTGRES_DB: menu_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_menu_data:/var/lib/postgresql/data
+    networks:
+      - restaurant-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U menu_user -d menu_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # База данных для Reservation Service
+  postgres_reservation:
+    image: postgres:15-alpine
+    container_name: postgres_reservation
+    environment:
+      POSTGRES_USER: res_user
+      POSTGRES_PASSWORD: res_pass
+      POSTGRES_DB: res_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_reservation_data:/var/lib/postgresql/data
+    networks:
+      - restaurant-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U res_user -d res_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # База данных для аналитики
+  postgres_analytics:
+    image: postgres:15-alpine
+    container_name: postgres_analytics
+    environment:
+      POSTGRES_USER: analytics_user
+      POSTGRES_PASSWORD: analytics_pass
+      POSTGRES_DB: analytics_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_analytics_data:/var/lib/postgresql/data
+    networks:
+      - restaurant-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U analytics_user -d analytics_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   auth_service:
     build: ./auth_service
+    container_name: auth_service
     depends_on:
-      - postgres
+      postgres_auth:
+        condition: service_healthy
+      kafka:
+        condition: service_started
     environment:
-      DATABASE_URL: postgresql://auth_user:auth_pass@postgres:5432/auth_db
+      DATABASE_URL: postgresql://auth_user:auth_pass@postgres_auth:5432/auth_db
+      KAFKA_BROKER: kafka:9092
+      JWT_SECRET: very_secret_key_change_in_production_12345
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 120
+      DEFAULT_ADMIN_EMAIL: admin@restaurant.com
+      DEFAULT_ADMIN_PASSWORD: Admin123!
     ports:
       - "8000:8000"
+    networks:
+      - restaurant-network
+    command: >
+      sh -c "sleep 15 && uvicorn main:app --host 0.0.0.0 --port 8000"
 
   menu_service:
     build: ./menu_service
+    container_name: menu_service
     depends_on:
-      - postgres
+      postgres_menu:
+        condition: service_healthy
+      kafka:
+        condition: service_started
     environment:
-      DATABASE_URL: postgresql://auth_user:auth_pass@postgres:5432/auth_db
+      DATABASE_URL: postgresql://menu_user:menu_pass@postgres_menu:5432/menu_db
+      KAFKA_BROKER: kafka:9092
+      JWT_SECRET: very_secret_key_change_in_production_12345
+      JWT_ALGORITHM: HS256
+      AUTH_SERVICE_URL: http://auth_service:8000
     ports:
       - "8001:8000"
+    networks:
+      - restaurant-network
+    command: >
+      sh -c "sleep 20 && uvicorn main:app --host 0.0.0.0 --port 8000"
 
   reservation_service:
     build: ./reservation_service
+    container_name: reservation_service
     depends_on:
-      - postgres
+      postgres_reservation:
+        condition: service_healthy
+      kafka:
+        condition: service_started
     environment:
-      DATABASE_URL: postgresql://auth_user:auth_pass@postgres:5432/auth_db
+      DATABASE_URL: postgresql://res_user:res_pass@postgres_reservation:5432/res_db
+      KAFKA_BROKER: kafka:9092
+      JWT_SECRET: very_secret_key_change_in_production_12345
+      JWT_ALGORITHM: HS256
+      AUTH_SERVICE_URL: http://auth_service:8000
+      MENU_SERVICE_URL: http://menu_service:8001
     ports:
       - "8002:8000"
+    networks:
+      - restaurant-network
+    command: >
+      sh -c "sleep 25 && uvicorn main:app --host 0.0.0.0 --port 8000"
+
+  # Создаем топики Kafka при запуске
+  kafka-init:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka_init
+    depends_on:
+      kafka:
+        condition: service_started
+    command: >
+      bash -c "
+        echo 'Waiting for Kafka to be ready...' &&
+        sleep 30 &&
+        kafka-topics --bootstrap-server kafka:9092 --create --topic user.events --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server kafka:9092 --create --topic menu.events --partitions 1 --replication-factor 1 &&
+        kafka-topics --bootstrap-server kafka:9092 --create --topic reservation.events --partitions 1 --replication-factor 1 &&
+        echo 'Kafka topics created successfully'
+      "
+    networks:
+      - restaurant-network
 
 volumes:
-  postgres_data:
+  postgres_auth_data:
+  postgres_menu_data:
+  postgres_reservation_data:
+  postgres_analytics_data:
+
+networks:
+  restaurant-network:
+    driver: bridge

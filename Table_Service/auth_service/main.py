@@ -1,9 +1,26 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from database import create_db_and_tables
 from routers.auth import router as auth_router
+from kafka_client import stop_producer
 
-app = FastAPI(title="Auth Service")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    print("🚀 Starting Auth Service...")
+    create_db_and_tables()
+    yield
+    # Shutdown
+    print("🛑 Shutting down Auth Service...")
+    await stop_producer()
+
+app = FastAPI(
+    title="Auth Service",
+    description="Authentication and user management service",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,10 +32,10 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 
-@app.on_event("startup")
-def on_startup():
-    create_db_and_tables()
-
 @app.get("/", tags=["Root"])
 def root():
     return {"message": "Auth Service works"}
+
+@app.get("/health")
+def health():
+    return {"status": "healthy", "service": "auth_service"}
