@@ -1,4 +1,32 @@
+version: '3.8'
+
 services:
+  # Сервис для генерации RSA ключей (запускается один раз)
+  key_generator:
+    image: python:3.11-slim
+    container_name: key_generator
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: >
+      sh -c "
+        echo '🔧 Установка зависимостей для генерации ключей...' &&
+        pip install --quiet cryptography &&
+        echo '✅ Зависимости установлены' &&
+        echo '🔑 Генерация RSA ключей...' &&
+        if [ ! -f .env ]; then
+          echo '⚠️  .env файл не найден!' &&
+          echo '   Создаем .env из .env.example...' &&
+          cp .env.example .env &&
+          echo '✅ .env создан из примера' &&
+          echo 'ℹ️  Отредактируйте .env своими значениями при необходимости'
+        fi &&
+        python generate_keys.py &&
+        echo '✅ Ключи успешно сгенерированы и скопированы'
+      "
+    networks:
+      - restaurant-network
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
     container_name: zookeeper
@@ -48,7 +76,7 @@ services:
     container_name: postgres_auth
     environment:
       POSTGRES_USER: auth_user
-      POSTGRES_PASSWORD: auth_pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_AUTH:-auth_pass}
       POSTGRES_DB: auth_db
     ports:
       - "5432:5432"
@@ -68,7 +96,7 @@ services:
     container_name: postgres_menu
     environment:
       POSTGRES_USER: menu_user
-      POSTGRES_PASSWORD: menu_pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_MENU:-menu_pass}
       POSTGRES_DB: menu_db
     ports:
       - "5433:5432"
@@ -88,7 +116,7 @@ services:
     container_name: postgres_reservation
     environment:
       POSTGRES_USER: res_user
-      POSTGRES_PASSWORD: res_pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_RESERVATION:-res_pass}
       POSTGRES_DB: res_db
     ports:
       - "5434:5432"
@@ -102,107 +130,174 @@ services:
       timeout: 5s
       retries: 5
 
-  # База данных для аналитики
-  postgres_analytics:
-    image: postgres:15-alpine
-    container_name: postgres_analytics
-    environment:
-      POSTGRES_USER: analytics_user
-      POSTGRES_PASSWORD: analytics_pass
-      POSTGRES_DB: analytics_db
-    ports:
-      - "5435:5432"
-    volumes:
-      - postgres_analytics_data:/var/lib/postgresql/data
-    networks:
-      - restaurant-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U analytics_user -d analytics_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   auth_service:
     build: ./auth_service
     container_name: auth_service
     depends_on:
+      key_generator:
+        condition: service_completed_successfully  # Ждем генерации ключей
       postgres_auth:
         condition: service_healthy
       kafka:
         condition: service_started
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql://auth_user:auth_pass@postgres_auth:5432/auth_db
-      KAFKA_BROKER: kafka:9092
-      JWT_SECRET: very_secret_key_change_in_production_12345
-      JWT_ALGORITHM: HS256
-      ACCESS_TOKEN_EXPIRE_MINUTES: 120
-      DEFAULT_ADMIN_EMAIL: admin@restaurant.com
-      DEFAULT_ADMIN_PASSWORD: Admin123!
+      DATABASE_URL: postgresql://auth_user:${POSTGRES_PASSWORD_AUTH:-auth_pass}@postgres_auth:5432/auth_db
+      KAFKA_BROKER: ${KAFKA_BROKER:-kafka:9092}
+      JWT_PRIVATE_KEY_PATH: /app/private_key.pem
+      JWT_PUBLIC_KEY_PATH: /app/public_key.pem
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_SECRET: ${JWT_SECRET:-change_this_secret}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@restaurant.com}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-Admin123!}
     ports:
       - "8000:8000"
+    volumes:
+      # Монтируем RSA ключи в контейнер
+      - ./private_key.pem:/app/private_key.pem
+      - ./public_key.pem:/app/public_key.pem
     networks:
       - restaurant-network
     command: >
-      sh -c "sleep 15 && uvicorn main:app --host 0.0.0.0 --port 8000"
+      sh -c "
+        echo '🔑 Проверка RSA ключей...' &&
+        if [ ! -f /app/private_key.pem ]; then
+          echo '❌ Ошибка: private_key.pem не найден!' &&
+          echo '   Запустите: python generate_keys.py' &&
+          exit 1
+        fi &&
+        sleep 15 &&
+        uvicorn main:app --host 0.0.0.0 --port 8000
+      "
 
   menu_service:
     build: ./menu_service
     container_name: menu_service
     depends_on:
+      key_generator:
+        condition: service_completed_successfully
       postgres_menu:
         condition: service_healthy
       kafka:
         condition: service_started
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql://menu_user:menu_pass@postgres_menu:5432/menu_db
-      KAFKA_BROKER: kafka:9092
-      JWT_SECRET: very_secret_key_change_in_production_12345
-      JWT_ALGORITHM: HS256
-      AUTH_SERVICE_URL: http://auth_service:8000
+      DATABASE_URL: postgresql://menu_user:${POSTGRES_PASSWORD_MENU:-menu_pass}@postgres_menu:5432/menu_db
+      KAFKA_BROKER: ${KAFKA_BROKER:-kafka:9092}
+      JWT_PUBLIC_KEY_PATH: /app/public_key.pem
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_SECRET: ${JWT_SECRET:-change_this_secret}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth_service:8000}
     ports:
       - "8001:8000"
+    volumes:
+      # Монтируем публичный ключ
+      - ./public_key.pem:/app/public_key.pem
     networks:
       - restaurant-network
     command: >
-      sh -c "sleep 20 && uvicorn main:app --host 0.0.0.0 --port 8000"
+      sh -c "
+        echo '🔑 Проверка публичного ключа...' &&
+        if [ ! -f /app/public_key.pem ]; then
+          echo '❌ Ошибка: public_key.pem не найден!' &&
+          echo '   Запустите: python generate_keys.py' &&
+          exit 1
+        fi &&
+        sleep 20 &&
+        uvicorn main:app --host 0.0.0.0 --port 8000
+      "
 
   reservation_service:
     build: ./reservation_service
     container_name: reservation_service
     depends_on:
+      key_generator:
+        condition: service_completed_successfully
       postgres_reservation:
         condition: service_healthy
       kafka:
         condition: service_started
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql://res_user:res_pass@postgres_reservation:5432/res_db
-      KAFKA_BROKER: kafka:9092
-      JWT_SECRET: very_secret_key_change_in_production_12345
-      JWT_ALGORITHM: HS256
-      AUTH_SERVICE_URL: http://auth_service:8000
-      MENU_SERVICE_URL: http://menu_service:8001
+      DATABASE_URL: postgresql://res_user:${POSTGRES_PASSWORD_RESERVATION:-res_pass}@postgres_reservation:5432/res_db
+      KAFKA_BROKER: ${KAFKA_BROKER:-kafka:9092}
+      JWT_PUBLIC_KEY_PATH: /app/public_key.pem
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
+      JWT_SECRET: ${JWT_SECRET:-change_this_secret}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth_service:8000}
+      MENU_SERVICE_URL: ${MENU_SERVICE_URL:-http://menu_service:8001}
     ports:
       - "8002:8000"
+    volumes:
+      # Монтируем публичный ключ
+      - ./public_key.pem:/app/public_key.pem
     networks:
       - restaurant-network
     command: >
-      sh -c "sleep 25 && uvicorn main:app --host 0.0.0.0 --port 8000"
+      sh -c "
+        echo '🔑 Проверка публичного ключа...' &&
+        if [ ! -f /app/public_key.pem ]; then
+          echo '❌ Ошибка: public_key.pem не найден!' &&
+          echo '   Запустите: python generate_keys.py' &&
+          exit 1
+        fi &&
+        sleep 25 &&
+        uvicorn main:app --host 0.0.0.0 --port 8000
+      "
 
-  # Создаем топики Kafka при запуске
+  # Сервис уведомлений (консьюмер Kafka)
+  notification_service:
+    build: ./notification_service
+    container_name: notification_service
+    depends_on:
+      key_generator:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      KAFKA_BROKER: ${KAFKA_BROKER:-kafka:9092}
+      SMTP_SERVER: ${SMTP_SERVER:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      FROM_EMAIL: ${FROM_EMAIL:-${SMTP_USERNAME}}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@restaurant.com}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - restaurant-network
+    command: >
+      sh -c "sleep 30 && python notification_consumer.py"
+
+  # Создаем топики Kafka при запуске (с проверкой существования)
   kafka-init:
     image: confluentinc/cp-kafka:7.4.0
     container_name: kafka_init
     depends_on:
+      key_generator:
+        condition: service_completed_successfully
       kafka:
         condition: service_started
+    environment:
+      KAFKA_BROKER: ${KAFKA_BROKER:-kafka:9092}
     command: >
       bash -c "
-        echo 'Waiting for Kafka to be ready...' &&
+        echo '⏳ Ожидание Kafka...' &&
         sleep 30 &&
-        kafka-topics --bootstrap-server kafka:9092 --create --topic user.events --partitions 1 --replication-factor 1 &&
-        kafka-topics --bootstrap-server kafka:9092 --create --topic menu.events --partitions 1 --replication-factor 1 &&
-        kafka-topics --bootstrap-server kafka:9092 --create --topic reservation.events --partitions 1 --replication-factor 1 &&
-        echo 'Kafka topics created successfully'
+        echo '📝 Создание топиков Kafka...' &&
+        # Создаем топики, если они еще не существуют
+        for topic in user.events menu.events reservation.events notifications; do
+          echo '   Проверка топика: $$topic' &&
+          kafka-topics --bootstrap-server $${KAFKA_BROKER} --list | grep -q $$topic || 
+          (kafka-topics --bootstrap-server $${KAFKA_BROKER} --create --topic $$topic --partitions 1 --replication-factor 1 &&
+           echo '   ✅ Создан топик: $$topic')
+        done &&
+        echo '🎉 Kafka топики готовы'
       "
     networks:
       - restaurant-network
@@ -211,7 +306,6 @@ volumes:
   postgres_auth_data:
   postgres_menu_data:
   postgres_reservation_data:
-  postgres_analytics_data:
 
 networks:
   restaurant-network:

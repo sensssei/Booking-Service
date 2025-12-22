@@ -1,0 +1,11 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Устанавливаем зависимости для генерации ключей
+RUN pip install --no-cache-dir cryptography
+
+# Копируем скрипт генерации ключей
+COPY generate_keys.py .
+
+CMD ["python", "generate_keys.py"]

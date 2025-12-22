@@ -86,6 +86,9 @@
 git clone <repository-url>
 cd Table_Service
 
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
 # 2. Запустите все сервисы
 docker-compose up --build
 

@@ -1,28 +1,57 @@
 import jwt
 import os
 from fastapi import HTTPException, status
+from typing import Dict, Any
 
-JWT_SECRET = os.getenv("JWT_SECRET", "change_this_secret")
-JWT_ALGORITHM = "HS256"
+# Настройки JWT с ассиметричными ключами
+JWT_PUBLIC_KEY_PATH = os.getenv("JWT_PUBLIC_KEY_PATH", "public_key.pem")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "RS256")
 
-def decode_access_token(token: str) -> dict:
+# Загружаем публичный ключ
+try:
+    with open(JWT_PUBLIC_KEY_PATH, 'r') as f:
+        JWT_PUBLIC_KEY = f.read()
+except FileNotFoundError:
+    # Fallback на HS256 для обратной совместимости
+    print(f"⚠️  Warning: Public key file not found: {JWT_PUBLIC_KEY_PATH}")
+    print("⚠️  Using fallback HS256")
+    JWT_PUBLIC_KEY = os.getenv("JWT_SECRET", "change_this_secret")
+    JWT_ALGORITHM = "HS256"
+
+def decode_access_token(token: str) -> Dict[str, Any]:
     """
     Декодирует JWT токен и возвращает словарь с user_id и role.
-    Совместимо с auth_service.
+    Использует публичный ключ для проверки подписи (RS256) или секрет (HS256).
     """
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        # Для RS256 проверяем issuer и audience, для HS256 - только подпись
+        if JWT_ALGORITHM == "RS256":
+            payload = jwt.decode(
+                token, 
+                JWT_PUBLIC_KEY, 
+                algorithms=["RS256"],  # ← ИСПРАВЛЕНО: явная строка
+                issuer="auth_service",  # Проверяем, что токен выпущен auth_service
+                audience="restaurant_services"  # Проверяем аудиторию
+            )
+        else:
+            # Fallback для HS256 (обратная совместимость)
+            payload = jwt.decode(
+                token, 
+                JWT_PUBLIC_KEY, 
+                algorithms=["HS256"]  # ← ИСПРАВЛЕНО: явная строка
+            )
         
         # Получаем user_id и role из токена
         user_id = payload.get("user_id")
         role = payload.get("role", "user")
         
         if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
+            raise HTTPException(status_code=401, detail="Invalid token: missing user_id")
             
         return {
             "user_id": user_id,
-            "role": role
+            "role": role,
+            "exp": payload.get("exp")
         }
         
     except jwt.ExpiredSignatureError:
@@ -30,18 +59,28 @@ def decode_access_token(token: str) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expired"
         )
-    except jwt.InvalidTokenError:
+    except jwt.InvalidIssuerError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
+            detail="Invalid token issuer. Token must be issued by auth_service"
+        )
+    except jwt.InvalidAudienceError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token audience"
+        )
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {str(e)}"
         )
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Token validation error: {str(e)}"
         )
 
-def require_admin(token: str) -> dict:
+def require_admin(token: str) -> Dict[str, Any]:
     """
     Проверяет, что пользователь имеет роль администратора.
     Возвращает данные пользователя из токена.
@@ -56,7 +95,7 @@ def require_admin(token: str) -> dict:
     
     return user_data
 
-def require_role(token: str, required_role: str) -> dict:
+def require_role(token: str, required_role: str) -> Dict[str, Any]:
     """
     Проверяет, что пользователь имеет определенную роль.
     """
@@ -69,3 +108,9 @@ def require_role(token: str, required_role: str) -> dict:
         )
     
     return user_data
+
+def decode_jwt_token(token: str) -> Dict[str, Any]:
+    """
+    Альтернативное имя для совместимости с существующим кодом.
+    """
+    return decode_access_token(token)

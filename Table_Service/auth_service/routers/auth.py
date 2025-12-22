@@ -37,7 +37,8 @@ async def register(payload: UserCreate, db: Session = Depends(get_session)):
             "email": user.email,
             "full_name": user.full_name,
             "role": user.role,
-            "created_at": user.created_at.isoformat()
+            "created_at": user.created_at.isoformat(),
+            "service": "auth_service"
         }
     )
     
@@ -49,23 +50,6 @@ async def register(payload: UserCreate, db: Session = Depends(get_session)):
         phone=user.phone,
         created_at=user.created_at,
         updated_at=user.updated_at
-    )
-
-# -----------------------------
-# Логин пользователя
-# -----------------------------
-@router.post("/login", response_model=TokenResponse)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_session)):
-    user = get_user_by_email(db, form_data.username)
-    if not user or not verify_password(form_data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    token = create_access_token(user.id, user.role)
-    return TokenResponse(
-        access_token=token,
-        user_id=user.id,
-        role=user.role,
-        expires_in=7200  # 2 часа
     )
 
 # -----------------------------
