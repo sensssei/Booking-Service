@@ -90,7 +90,8 @@ async def add_menu_item(
         "name": menu_item.name,
         "price": menu_item.price,
         "created_by": user_data["user_id"],
-        "created_at": menu_item.created_at.isoformat()
+        "created_at": menu_item.created_at.isoformat(),
+        "service": "menu_service"
     })
     
     return menu_item
@@ -146,7 +147,8 @@ async def update_menu_item_endpoint(
         "name": updated_item.name,
         "price": updated_item.price,
         "updated_by": user_data["user_id"],
-        "updated_at": updated_item.updated_at.isoformat()
+        "updated_at": updated_item.updated_at.isoformat(),
+        "service": "menu_service"
     })
     
     return updated_item
@@ -199,7 +201,8 @@ async def delete_menu_item_endpoint(
         "event_type": "menu_item.deleted",
         "item_id": item_id,
         "deleted_by": user_data["user_id"],
-        "deleted_at": datetime.utcnow().isoformat()
+        "deleted_at": datetime.utcnow().isoformat(),
+        "service": "menu_service"
     })
     
     return None  # 204 No Content

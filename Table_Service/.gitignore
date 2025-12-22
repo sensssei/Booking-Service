@@ -1,0 +1,8 @@
+# .gitignore
+.env
+*.pem
+private_key.pem
+public_key.pem
+.env.local
+.env.dev
+.env.*.local

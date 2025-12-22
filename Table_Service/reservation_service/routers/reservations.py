@@ -77,7 +77,8 @@ async def create_new_reservation(
                 "table_id": new_reservation.table_id,
                 "guests_count": new_reservation.guests_count,
                 "reservation_date": new_reservation.reservation_time,
-                "status": new_reservation.status.value
+                "status": new_reservation.status.value,
+                "service": "reservation_service"
             })
         except Exception as kafka_error:
             print(f" Kafka error (non-critical): {kafka_error}")
@@ -294,7 +295,9 @@ def get_all_tables_endpoint(
             "capacity": t.capacity,
             "description": t.description,
             "is_active": t.is_active,
-            "created_at": t.created_at
+            "created_at": t.created_at,
+            "service": "reservation_service"
+            
         }
         for t in tables
     ]

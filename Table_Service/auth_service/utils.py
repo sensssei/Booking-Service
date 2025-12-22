@@ -11,10 +11,25 @@ from typing import Optional, Dict, Any
 # Контекст для хеширования паролей
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Секрет и алгоритм для JWT
-JWT_SECRET = os.getenv("JWT_SECRET", "change_this_secret")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+# Настройки JWT с ассиметричными ключами
+JWT_PRIVATE_KEY_PATH = os.getenv("JWT_PRIVATE_KEY_PATH", "private_key.pem")
+JWT_PUBLIC_KEY_PATH = os.getenv("JWT_PUBLIC_KEY_PATH", "public_key.pem")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "RS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "120"))  # 2 часа
+
+# Загружаем ключи
+try:
+    with open(JWT_PRIVATE_KEY_PATH, 'r') as f:
+        JWT_PRIVATE_KEY = f.read()
+    
+    with open(JWT_PUBLIC_KEY_PATH, 'r') as f:
+        JWT_PUBLIC_KEY = f.read()
+except FileNotFoundError as e:
+    print(f"⚠️  Warning: Key file not found: {e}")
+    print("⚠️  Using fallback HS256 with default secret")
+    JWT_PRIVATE_KEY = os.getenv("JWT_SECRET", "change_this_secret")
+    JWT_PUBLIC_KEY = JWT_PRIVATE_KEY
+    JWT_ALGORITHM = "HS256"
 
 # -----------------------------
 # Функции для паролей
@@ -40,11 +55,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 # -----------------------------
-# Функции для JWT
+# Функции для JWT с ассиметричными ключами
 # -----------------------------
 def create_access_token(user_id: int, role: str = "user", expires_delta_minutes: int = None) -> str:
     """
     Создаёт JWT токен для пользователя с ролью
+    Использует приватный ключ (только auth_service может создавать токены)
     """
     if expires_delta_minutes is None:
         expires_delta_minutes = ACCESS_TOKEN_EXPIRE_MINUTES
@@ -54,18 +70,31 @@ def create_access_token(user_id: int, role: str = "user", expires_delta_minutes:
         "user_id": user_id,
         "role": role,
         "exp": expire,
-        "iat": datetime.utcnow()  # issued at
+        "iat": datetime.utcnow(),  # issued at
+        "iss": "auth_service",  # issuer для проверки
+        "aud": "restaurant_services"  # audience
     }
     
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    # Используем приватный ключ для подписи (RS256) или симметричный ключ (HS256)
+    token = jwt.encode(payload, JWT_PRIVATE_KEY, algorithm=JWT_ALGORITHM)
     return token
 
 def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
     """
     Декодирует JWT токен и возвращает словарь с user_id и role
+    Использует публичный ключ для проверки подписи (RS256)
     """
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        # Для RS256 используем публичный ключ, для HS256 - тот же секрет
+        key = JWT_PUBLIC_KEY if JWT_ALGORITHM == "RS256" else JWT_PUBLIC_KEY
+        
+        payload = jwt.decode(
+            token, 
+            key, 
+            algorithms=[JWT_ALGORITHM],
+            issuer="auth_service" if JWT_ALGORITHM == "RS256" else None,
+            audience="restaurant_services" if JWT_ALGORITHM == "RS256" else None
+        )
         
         # Преобразуем exp из datetime обратно в timestamp для проверки
         if isinstance(payload.get("exp"), datetime):
@@ -75,13 +104,17 @@ def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
         return {
             "user_id": payload.get("user_id"),
             "role": payload.get("role", "user"),
-            "exp": payload.get("exp")
+            "exp": payload.get("exp"),
+            "iss": payload.get("iss"),
+            "aud": payload.get("aud")
         }
     except jwt.ExpiredSignatureError:
         return None
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        print(f"Token validation error: {e}")
         return None
-    except Exception:
+    except Exception as e:
+        print(f"Unexpected error decoding token: {e}")
         return None
 
 def get_current_user(token: str, db: Session) -> Dict[str, Any]:
