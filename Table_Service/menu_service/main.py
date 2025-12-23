@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from fastapi.openapi.utils import get_openapi  # ← ДОБАВИТЬ
+from fastapi.openapi.utils import get_openapi  
 from database import create_db_and_tables
 from routers.menu import router as menu_router
 from kafka_client import stop_producer
