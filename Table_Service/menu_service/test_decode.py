@@ -2,7 +2,7 @@ import jwt
 import os
 import sys
 
-# Установите переменные
+# Установим переменные
 os.environ['JWT_PUBLIC_KEY_PATH'] = '/app/public_key.pem'
 os.environ['JWT_ALGORITHM'] = 'RS256'
 
@@ -13,7 +13,7 @@ print(f"=== Тестирование декодирования JWT ===")
 print(f"JWT_PUBLIC_KEY_PATH: {JWT_PUBLIC_KEY_PATH}")
 print(f"JWT_ALGORITHM: {JWT_ALGORITHM}")
 
-# Загрузите ключ
+# Загрузим ключ
 try:
     with open(JWT_PUBLIC_KEY_PATH, 'r') as f:
         JWT_PUBLIC_KEY = f.read()
@@ -22,7 +22,7 @@ except Exception as e:
     print(f"❌ Ошибка загрузки ключа: {e}")
     sys.exit(1)
 
-# Ваш токен
+
 token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo4LCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3NjYzNzc3NTQsImlhdCI6MTc2NjM3MDU1NCwiaXNzIjoiYXV0aF9zZXJ2aWNlIiwiYXVkIjoicmVzdGF1cmFudF9zZXJ2aWNlcyJ9.ZrISyYKna4_BSYe_ADWlQYwNxNq6PFTVTHyguNFqLryPRqp-9bxG2aOdbved3zwSHyUIm7OyASEmj77RpKHTaCbaH8bhI1tphN-sbMkYX0J0miCGWmsZG9Uo92V0Ict-DFDEHVRgC-U1b1DlOi-Ob29hv2ktAAq767X4rTbFPSKpLbQz2lIXn-G6CLnyBnLULQHMTOOTvyqvhWHbkgBFG1ytragm6ivY0iElSe7SXlIOhzlfDwmuZBmPbwh9x-VRRNUtNJvkx0G_UHyYxs69NKtV946XjdCQHGT55UX4sLG5JpM96s2MJyXd0KzaeCnOR9xY-yNY7VSYwPM0yqkzhA"
 
 print(f"\n=== Анализ токена ===")

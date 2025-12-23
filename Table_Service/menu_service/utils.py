@@ -29,7 +29,7 @@ def decode_access_token(token: str) -> Dict[str, Any]:
             payload = jwt.decode(
                 token, 
                 JWT_PUBLIC_KEY, 
-                algorithms=["RS256"],  # ← ИСПРАВЛЕНО: явная строка
+                algorithms=["RS256"],  
                 issuer="auth_service",  # Проверяем, что токен выпущен auth_service
                 audience="restaurant_services"  # Проверяем аудиторию
             )
@@ -38,7 +38,7 @@ def decode_access_token(token: str) -> Dict[str, Any]:
             payload = jwt.decode(
                 token, 
                 JWT_PUBLIC_KEY, 
-                algorithms=["HS256"]  # ← ИСПРАВЛЕНО: явная строка
+                algorithms=["HS256"]  
             )
         
         # Получаем user_id и role из токена
